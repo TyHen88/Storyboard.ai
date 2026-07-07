@@ -4,7 +4,7 @@ import { geminiGenerate, friendlyGeminiError } from "@/lib/gemini";
 
 export async function POST(req: NextRequest) {
   try {
-    const { storyTitle, storyConcept, characters, scenes, instruction } = await req.json();
+    const { storyTitle, storyConcept, characters, scenes, instruction, model } = await req.json();
 
     if (!scenes || !Array.isArray(scenes)) {
       return NextResponse.json(
@@ -33,7 +33,7 @@ ${DIRECTING_RULES}`,
       },
     ];
 
-    const data = await geminiGenerate(parts, SCENE_SCHEMA);
+    const data = await geminiGenerate(parts, SCENE_SCHEMA, model);
     return NextResponse.json(data);
   } catch (error: any) {
     console.error("Gemini API Error:", error);

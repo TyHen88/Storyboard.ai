@@ -3,9 +3,10 @@
 import React, { useState, useEffect } from 'react';
 import Image from 'next/image';
 import { motion } from 'motion/react';
-import { Wand2, Paperclip } from 'lucide-react';
+import { Wand2, Paperclip, Settings } from 'lucide-react';
 import { IDEAS } from '@/lib/constants';
 import SceneCountPicker from '@/components/SceneCountPicker';
+import ModelDropdown from '@/components/ModelDropdown';
 
 /** First-launch bottom-center chat input with hero text and animated border. */
 export default function ChatBar({
@@ -105,6 +106,16 @@ export default function ChatBar({
             <div className="flex items-center justify-between gap-2.5 mt-1">
               <SceneCountPicker value={sceneCount} onChange={onSceneCountChange} variant="dark" />
               <div className="flex items-center gap-2.5">
+              <ModelDropdown
+                align="left"
+                openUp
+                title="Choose AI model"
+                triggerClassName="rounded-full p-px bg-gradient-to-br from-gray-300/60 to-gray-400/60 dark:from-zinc-600/60 dark:to-zinc-500/60 hover:from-gray-400 hover:to-gray-500 transition-all shrink-0 block"
+              >
+                <span className="w-9 h-9 rounded-full bg-white dark:bg-[#0A0E1C] flex items-center justify-center text-gray-500 dark:text-zinc-300">
+                  <Settings size={15} />
+                </span>
+              </ModelDropdown>
               <button
                 onClick={onAttach}
                 className="rounded-full p-px bg-gradient-to-br from-indigo-400/60 to-purple-500/60 hover:from-indigo-400 hover:to-purple-500 transition-all shrink-0"

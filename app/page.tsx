@@ -7,7 +7,9 @@ import { motion, AnimatePresence } from 'motion/react';
 import type { Scene, Dialogue, StoryData, Character } from '@/lib/types';
 import { PAD, TITLE_W, SCENE_W, GAP, MIN_SCALE, MAX_SCALE } from '@/lib/constants';
 import { THEME_KEY, THEME_EVENT, subscribeTheme, readTheme } from '@/lib/theme';
-import { loadProject, saveProject } from '@/lib/storage';
+import { subscribeModel, readModel, DEFAULT_MODEL } from '@/lib/settings';
+import { loadProject } from '@/lib/storage';
+import { loadHistory, saveEntry, deleteEntry, newProjectId, type HistoryEntry } from '@/lib/history';
 import Sidebar from '@/components/Sidebar';
 import Inspector from '@/components/Inspector';
 import ChatBar from '@/components/ChatBar';
@@ -23,12 +25,16 @@ import ExportDialog from '@/components/ExportDialog';
 
 export default function StoryboardApp() {
   const theme = useSyncExternalStore(subscribeTheme, readTheme, () => 'light' as const);
+  const model = useSyncExternalStore(subscribeModel, readModel, () => DEFAULT_MODEL);
   const [prompt, setPrompt] = useState('');
   const [imageBase64, setImageBase64] = useState<string>('');
   // How many scenes to generate (1–6)
   const [sceneCount, setSceneCount] = useState(6);
   const [isGenerating, setIsGenerating] = useState(false);
   const [storyData, setStoryData] = useState<StoryData | null>(null);
+  // Conversation history (saved storyboards) + the id of the active one
+  const [history, setHistory] = useState<HistoryEntry[]>([]);
+  const [currentId, setCurrentId] = useState<string | null>(null);
   const [error, setError] = useState('');
   // Start collapsed: first launch is just the canvas with the chat bar.
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -67,12 +73,17 @@ export default function StoryboardApp() {
     toolRef.current = tool;
   }, [tool]);
 
-  // Auto-save (debounced, validated) whenever the project changes
+  // Auto-save (debounced, validated) the active conversation whenever it changes
   useEffect(() => {
-    if (!storyData) return;
-    const t = setTimeout(() => saveProject(storyData, seeds), 400);
+    if (!storyData || !currentId) return;
+    const id = currentId;
+    const t = setTimeout(() => {
+      setHistory(
+        saveEntry({ id, title: storyData.title, savedAt: new Date().toISOString(), storyData, seeds })
+      );
+    }, 400);
     return () => clearTimeout(t);
-  }, [storyData, seeds]);
+  }, [storyData, seeds, currentId]);
 
   const toggleTheme = () => {
     localStorage.setItem(THEME_KEY, theme === 'light' ? 'dark' : 'light');
@@ -171,17 +182,81 @@ export default function StoryboardApp() {
     setPosition({ x: (el.clientWidth - totalW * s) / 2, y: 60 - PAD * s });
   }, []);
 
-  // Restore the last auto-saved project on load (survives refreshes/crashes)
+  // Restore conversation history on load, migrating any legacy single project,
+  // and reopen the most recent storyboard (survives refreshes/crashes).
   useEffect(() => {
-    const saved = loadProject();
-    if (!saved) return;
+    let hist = loadHistory();
+    if (hist.length === 0) {
+      const legacy = loadProject();
+      if (legacy) {
+        hist = saveEntry({
+          id: newProjectId(),
+          title: legacy.storyData.title,
+          savedAt: legacy.savedAt || new Date().toISOString(),
+          storyData: legacy.storyData,
+          seeds: legacy.seeds,
+        });
+      }
+    }
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setStoryData(saved.storyData);
-    setSeeds(saved.seeds);
+    setHistory(hist);
+    const latest = hist[0];
+    if (!latest) return;
+    setStoryData(latest.storyData);
+    setSeeds(latest.seeds);
+    setCurrentId(latest.id);
     setSidebarOpen(true);
-    const t = setTimeout(() => fitView(saved.storyData), 60);
+    const t = setTimeout(() => fitView(latest.storyData), 60);
     return () => clearTimeout(t);
   }, [fitView]);
+
+  // Start a fresh conversation: clear the canvas back to the prompt composer.
+  const newConversation = () => {
+    setStoryData(null);
+    setCurrentId(null);
+    setSelectedScene(null);
+    setSeeds({});
+    setPrompt('');
+    setImageBase64('');
+    setError('');
+    setScale(1);
+    setPosition({ x: 0, y: 0 });
+    setSidebarOpen(true);
+  };
+
+  // Open a saved conversation from history.
+  const openConversation = (id: string) => {
+    const entry = history.find((e) => e.id === id);
+    if (!entry) return;
+    setStoryData(entry.storyData);
+    setSeeds(entry.seeds);
+    setCurrentId(id);
+    setSelectedScene(null);
+    setScale(1);
+    setPosition({ x: 0, y: 0 });
+    setSidebarOpen(true);
+    setTimeout(() => fitView(entry.storyData), 60);
+  };
+
+  // Delete a conversation; if it was active, fall back to the next most recent.
+  const removeConversation = (id: string) => {
+    const next = deleteEntry(id);
+    setHistory(next);
+    if (id !== currentId) return;
+    const latest = next[0];
+    if (latest) {
+      setStoryData(latest.storyData);
+      setSeeds(latest.seeds);
+      setCurrentId(latest.id);
+      setSelectedScene(null);
+      setTimeout(() => fitView(latest.storyData), 60);
+    } else {
+      setStoryData(null);
+      setCurrentId(null);
+      setSeeds({});
+      setSelectedScene(null);
+    }
+  };
 
   const focusScene = (idx: number) => {
     const el = canvasRef.current;
@@ -210,7 +285,7 @@ export default function StoryboardApp() {
       const res = await fetch('/api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt, image: imageBase64, sceneCount }),
+        body: JSON.stringify({ prompt, image: imageBase64, sceneCount, model }),
       });
 
       if (!res.ok) {
@@ -219,7 +294,11 @@ export default function StoryboardApp() {
       }
 
       const data: StoryData = await res.json();
+      // Each generated storyboard is its own conversation in history.
+      const id = newProjectId();
+      setCurrentId(id);
       setStoryData(data);
+      setHistory(saveEntry({ id, title: data.title, savedAt: new Date().toISOString(), storyData: data, seeds: {} }));
       setSidebarOpen(true);
       // Let the frames mount, then frame the whole board in view
       setTimeout(() => fitView(data), 60);
@@ -278,6 +357,7 @@ export default function StoryboardApp() {
             description: s.description,
           })),
           instruction,
+          model,
         }),
       });
       const data = await res.json();
@@ -316,6 +396,7 @@ export default function StoryboardApp() {
           storyTitle: storyData.title,
           storyConcept: storyData.concept,
           characters: storyData.characters ?? [],
+          model,
         }),
       });
       const data = await res.json();
@@ -446,6 +527,11 @@ export default function StoryboardApp() {
           theme={theme}
           onToggleTheme={toggleTheme}
           onCollapse={() => setSidebarOpen(false)}
+          history={history}
+          currentId={currentId}
+          onNewConversation={newConversation}
+          onSelectConversation={openConversation}
+          onDeleteConversation={removeConversation}
           storyData={storyData}
           prompt={prompt}
           onPromptChange={setPrompt}

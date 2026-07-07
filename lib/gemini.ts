@@ -19,7 +19,21 @@ const isRetryable = (error: any) => {
   return s === 503 || s === 429 || s === 500;
 };
 
-export async function geminiGenerate(parts: any[], schema: object): Promise<any> {
+/** The chosen model doesn't exist / isn't accessible — try the next one. */
+const isModelUnavailable = (error: any) => {
+  const s = statusOf(error);
+  if (s === 404) return true;
+  const msg = String(error?.message ?? '').toLowerCase();
+  return s === 400 && (msg.includes('not found') || msg.includes('not supported') || msg.includes('unsupported') || msg.includes('does not exist'));
+};
+
+/** Ordered, de-duplicated model list with the user's preferred model first. */
+const modelChain = (preferred?: string): string[] => {
+  const chain = preferred ? [preferred, ...MODELS] : [...MODELS];
+  return [...new Set(chain)];
+};
+
+export async function geminiGenerate(parts: any[], schema: object, preferredModel?: string): Promise<any> {
   const ai = new GoogleGenAI({
     apiKey: process.env.GEMINI_API_KEY,
     httpOptions: {
@@ -29,8 +43,11 @@ export async function geminiGenerate(parts: any[], schema: object): Promise<any>
     },
   });
 
+  const models = modelChain(preferredModel);
   let lastError: any;
-  for (const model of MODELS) {
+  for (let m = 0; m < models.length; m++) {
+    const model = models[m];
+    const hasNextModel = m < models.length - 1;
     for (let attempt = 0; attempt < ATTEMPTS_PER_MODEL; attempt++) {
       try {
         const response = await ai.models.generateContent({
@@ -45,9 +62,17 @@ export async function geminiGenerate(parts: any[], schema: object): Promise<any>
         return JSON.parse(response.text);
       } catch (error: any) {
         lastError = error;
-        if (!isRetryable(error)) throw error;
-        console.warn(`Gemini ${model} attempt ${attempt + 1} failed (${statusOf(error)}), retrying...`);
-        await sleep(800 * (attempt + 1) + Math.random() * 400);
+        if (isRetryable(error)) {
+          console.warn(`Gemini ${model} attempt ${attempt + 1} failed (${statusOf(error)}), retrying...`);
+          await sleep(800 * (attempt + 1) + Math.random() * 400);
+          continue;
+        }
+        // Unavailable model: skip to the next model in the chain instead of failing.
+        if (isModelUnavailable(error) && hasNextModel) {
+          console.warn(`Gemini ${model} unavailable (${statusOf(error)}), falling back to ${models[m + 1]}.`);
+          break;
+        }
+        throw error;
       }
     }
   }

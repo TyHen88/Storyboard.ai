@@ -28,7 +28,7 @@ function structureGuidance(count: number): string {
 
 export async function POST(req: NextRequest) {
   try {
-    const { prompt, image, sceneCount } = await req.json();
+    const { prompt, image, sceneCount, model } = await req.json();
 
     if (!prompt) {
       return NextResponse.json(
@@ -71,7 +71,7 @@ ${DIRECTING_RULES}` }
       }
     }
 
-    const data = await geminiGenerate(parts, STORY_SCHEMA);
+    const data = await geminiGenerate(parts, STORY_SCHEMA, model);
     return NextResponse.json(data);
   } catch (error: any) {
     console.error("Gemini API Error:", error);

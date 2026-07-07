@@ -6,23 +6,49 @@ import {
   Film,
   Sun,
   Moon,
+  Settings,
   PanelLeftClose,
   Image as ImageIcon,
-  Wand2,
   Loader2,
   Maximize,
   Download,
   Clapperboard,
+  Plus,
+  Trash2,
+  MessageSquarePlus,
 } from 'lucide-react';
 import { CLAPPER_STRIPES, imageUrl } from '@/lib/constants';
 import type { StoryData } from '@/lib/types';
+import type { HistoryEntry } from '@/lib/history';
 import SceneCountPicker from '@/components/SceneCountPicker';
+import ModelDropdown from '@/components/ModelDropdown';
+
+/** Compact relative time for history rows (client-only, no hydration risk). */
+function timeAgo(iso: string): string {
+  if (!iso) return '';
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return '';
+  const s = Math.max(0, Math.floor((Date.now() - then) / 1000));
+  if (s < 60) return 'just now';
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.floor(h / 24);
+  if (d < 7) return `${d}d ago`;
+  return new Date(iso).toLocaleDateString();
+}
 
 export default function Sidebar({
   open,
   theme,
   onToggleTheme,
   onCollapse,
+  history,
+  currentId,
+  onNewConversation,
+  onSelectConversation,
+  onDeleteConversation,
   storyData,
   prompt,
   onPromptChange,
@@ -45,6 +71,11 @@ export default function Sidebar({
   theme: 'light' | 'dark';
   onToggleTheme: () => void;
   onCollapse: () => void;
+  history: HistoryEntry[];
+  currentId: string | null;
+  onNewConversation: () => void;
+  onSelectConversation: (id: string) => void;
+  onDeleteConversation: (id: string) => void;
   storyData: StoryData | null;
   prompt: string;
   onPromptChange: (v: string) => void;
@@ -76,6 +107,13 @@ export default function Sidebar({
             <h1 className="font-semibold text-lg tracking-tight dark:text-zinc-100">AI Storyboard</h1>
           </div>
           <div className="flex items-center gap-0.5">
+            <ModelDropdown
+              align="right"
+              title="Choose AI model"
+              triggerClassName="p-1.5 rounded-md text-gray-500 hover:text-gray-900 hover:bg-gray-100 dark:text-zinc-400 dark:hover:text-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+            >
+              <Settings size={18} />
+            </ModelDropdown>
             <button
               onClick={onToggleTheme}
               className="p-1.5 rounded-md text-gray-500 hover:text-gray-900 hover:bg-gray-100 dark:text-zinc-400 dark:hover:text-zinc-100 dark:hover:bg-zinc-800 transition-colors"
@@ -94,86 +132,57 @@ export default function Sidebar({
         </div>
 
         <div className="p-5 flex-1 overflow-y-auto flex flex-col gap-5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-          {!storyData && (
-            <>
-              <div className="flex flex-col gap-2">
-                <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Concept / Prompt</label>
-                <textarea
-                  className="w-full h-32 p-3 text-sm border border-gray-300 dark:border-zinc-700 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none bg-gray-50 dark:bg-zinc-950 dark:text-zinc-300"
-                  placeholder="e.g. A cyberpunk detective searching for a lost AI in a neon-drenched city..."
-                  value={prompt}
-                  onChange={(e) => onPromptChange(e.target.value)}
-                  onKeyDown={(e) => {
-                    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') onGenerate();
-                  }}
-                />
-              </div>
-
-              <div className="flex flex-col gap-2">
-                <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider flex items-center justify-between">
-                  Reference Image <span className="font-normal text-gray-400 lowercase">(optional)</span>
-                </label>
-                <div
-                  className={`border-2 border-dashed rounded-md p-4 flex flex-col items-center justify-center text-center cursor-pointer transition-colors ${imageBase64 ? 'border-gray-300 bg-gray-50 dark:border-zinc-700 dark:bg-zinc-800/50' : 'border-gray-300 hover:bg-gray-50 dark:border-zinc-700 dark:hover:bg-zinc-800/50'}`}
-                  onClick={() => fileInputRef.current?.click()}
-                >
-                  <input
-                    type="file"
-                    className="hidden"
-                    ref={fileInputRef}
-                    accept="image/*"
-                    onChange={onImageUpload}
-                  />
-                  {imageBase64 ? (
-                    <div className="relative w-full aspect-video rounded overflow-hidden">
-                      <Image src={imageBase64} alt="Reference" fill className="object-cover" />
-                      <div className="absolute inset-0 bg-black/40 opacity-0 hover:opacity-100 flex items-center justify-center transition-opacity">
-                        <span className="text-white text-xs font-medium">Change Image</span>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="flex flex-col items-center text-gray-500">
-                      <ImageIcon size={24} className="mb-2 text-gray-400" />
-                      <span className="text-sm dark:text-zinc-400">Click to upload image</span>
-                      <span className="text-xs text-gray-400 mt-1">Characters, settings, etc.</span>
-                    </div>
-                  )}
-                </div>
-                {imageBase64 && (
-                  <button
-                    onClick={onRemoveImage}
-                    className="text-xs text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 text-left w-max"
-                  >
-                    Remove image
-                  </button>
-                )}
-              </div>
-
-              <div className="flex flex-col gap-2">
-                <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Number of scenes</label>
-                <SceneCountPicker value={sceneCount} onChange={onSceneCountChange} />
-              </div>
-
+          {/* Conversations / history */}
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider flex items-center gap-1.5">
+                <MessageSquarePlus size={13} /> Conversations
+              </label>
               <button
-                onClick={onGenerate}
-                disabled={isGenerating || !prompt.trim()}
-                className="w-full py-2.5 px-4 bg-black dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-md font-medium text-sm hover:bg-gray-800 dark:hover:bg-zinc-300 disabled:bg-gray-300 dark:disabled:bg-zinc-800 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
-                title="Ctrl+Enter"
+                onClick={onNewConversation}
+                className="flex items-center gap-1 text-[11px] font-medium px-2 py-1 rounded-md border border-gray-300 dark:border-zinc-700 text-gray-600 dark:text-zinc-300 hover:bg-gray-50 dark:hover:bg-zinc-800 transition-colors"
+                title="Start a new conversation"
               >
-                {isGenerating ? (
-                  <>
-                    <Loader2 size={16} className="animate-spin" />
-                    Generating Scenes...
-                  </>
-                ) : (
-                  <>
-                    <Wand2 size={16} />
-                    Generate Storyboard
-                  </>
-                )}
+                <Plus size={13} /> New
               </button>
-            </>
-          )}
+            </div>
+
+            {history.length === 0 ? (
+              <p className="text-xs text-gray-400 dark:text-zinc-500 py-1">No saved storyboards yet.</p>
+            ) : (
+              <div className="flex flex-col">
+                {history.map((h, i) => {
+                  const active = h.id === currentId;
+                  return (
+                    <div
+                      key={h.id}
+                      className={`group flex items-center gap-1.5 ${i > 0 ? 'border-t border-gray-100 dark:border-zinc-800' : ''}`}
+                    >
+                      <button
+                        onClick={() => onSelectConversation(h.id)}
+                        className={`min-w-0 flex-1 text-left py-2 px-2 rounded-md transition-colors ${active ? 'bg-blue-50/60 dark:bg-blue-500/10' : 'hover:bg-gray-50 dark:hover:bg-zinc-800/60'}`}
+                        title={h.title}
+                      >
+                        <div className={`text-xs font-medium truncate ${active ? 'text-blue-700 dark:text-blue-300' : 'dark:text-zinc-200'}`}>
+                          {h.title}
+                        </div>
+                        <div className="text-[10px] text-gray-400 dark:text-zinc-500">
+                          {[timeAgo(h.savedAt), `${h.storyData.scenes.length} scenes`].filter(Boolean).join(' · ')}
+                        </div>
+                      </button>
+                      <button
+                        onClick={() => onDeleteConversation(h.id)}
+                        className="shrink-0 p-1.5 rounded-md text-gray-400 opacity-0 group-hover:opacity-100 hover:text-red-500 hover:bg-gray-100 dark:hover:bg-zinc-800 dark:hover:text-red-400 transition-all"
+                        title="Delete conversation"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
 
           {error && (
             <div className="p-3 bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400 text-sm rounded border border-red-100 dark:border-red-900/50">
@@ -183,6 +192,9 @@ export default function Sidebar({
 
           {storyData && (
             <>
+              {/* Horizontal divider between history and the current storyboard */}
+              <div className="border-t border-gray-200 dark:border-zinc-800 -mt-1" />
+
               {/* Production poster card */}
               <div className="rounded-xl overflow-hidden border border-gray-200 dark:border-zinc-700 shadow-sm">
                 <div className="h-2.5" style={{ background: CLAPPER_STRIPES }} />
