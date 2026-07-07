@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import { motion } from 'motion/react';
 import { X, Download, FileJson, FileText, Clapperboard, Film } from 'lucide-react';
-import { buildExport, downloadExport, type ExportContent, type ExportFormat } from '@/lib/export';
+import { buildExport, downloadExport, VIDEO_PROVIDERS, type ExportContent, type ExportFormat, type VideoProvider } from '@/lib/export';
 import type { StoryData } from '@/lib/types';
 
 const CONTENT_OPTIONS: { value: ExportContent; label: string; hint: string; icon: React.ReactNode }[] = [
@@ -29,6 +29,7 @@ export default function ExportDialog({
 }) {
   const [content, setContent] = useState<ExportContent>('video');
   const [format, setFormat] = useState<ExportFormat>('json');
+  const [provider, setProvider] = useState<VideoProvider>('universal');
   const [scopeKind, setScopeKind] = useState<'all' | 'scene' | 'range'>(defaultScene != null ? 'scene' : 'all');
   const numbers = story.scenes.map((s) => s.sceneNumber);
   const [sceneNumber, setSceneNumber] = useState<number>(defaultScene ?? numbers[0]);
@@ -44,7 +45,7 @@ export default function ExportDialog({
         : scopeKind === 'scene'
           ? ({ kind: 'scene', sceneNumber } as const)
           : ({ kind: 'range', from: Math.min(from, to), to: Math.max(from, to) } as const);
-    downloadExport(buildExport(story, content, effectiveFormat, scope));
+    downloadExport(buildExport(story, content, effectiveFormat, scope, provider));
     onClose();
   };
 
@@ -93,6 +94,25 @@ export default function ExportDialog({
               ))}
             </div>
           </div>
+
+          {/* Video provider (only for AI video prompts) */}
+          {content === 'video' && (
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[10px] font-bold text-gray-400 dark:text-zinc-500 uppercase tracking-wider">Target video model</label>
+              <select className={selectCls} value={provider} onChange={(e) => setProvider(e.target.value as VideoProvider)}>
+                {VIDEO_PROVIDERS.map((p) => (
+                  <option key={p.value} value={p.value}>
+                    {p.label} — {p.hint}
+                  </option>
+                ))}
+              </select>
+              {provider === 'all' && effectiveFormat !== 'json' && (
+                <span className="text-[10px] text-amber-600 dark:text-amber-500">
+                  “All providers” emits every variant in JSON only; Markdown/Text will use the Universal prompt.
+                </span>
+              )}
+            </div>
+          )}
 
           {/* Scope */}
           <div className="flex flex-col gap-1.5">

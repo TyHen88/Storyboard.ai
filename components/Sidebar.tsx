@@ -22,6 +22,7 @@ import type { StoryData } from '@/lib/types';
 import type { HistoryEntry } from '@/lib/history';
 import SceneCountPicker from '@/components/SceneCountPicker';
 import ModelDropdown from '@/components/ModelDropdown';
+import StylePicker from '@/components/StylePicker';
 
 /** Compact relative time for history rows (client-only, no hydration risk). */
 function timeAgo(iso: string): string {
@@ -58,6 +59,8 @@ export default function Sidebar({
   onRemoveImage,
   sceneCount,
   onSceneCountChange,
+  style,
+  onStyleChange,
   isGenerating,
   onGenerate,
   error,
@@ -85,6 +88,8 @@ export default function Sidebar({
   onRemoveImage: () => void;
   sceneCount: number;
   onSceneCountChange: (n: number) => void;
+  style: string;
+  onStyleChange: (id: string) => void;
   isGenerating: boolean;
   onGenerate: () => void;
   error: string;
@@ -264,7 +269,10 @@ export default function Sidebar({
                   }}
                 />
                 <input type="file" className="hidden" ref={fileInputRef} accept="image/*" onChange={onImageUpload} />
-                <SceneCountPicker value={sceneCount} onChange={onSceneCountChange} />
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <SceneCountPicker value={sceneCount} onChange={onSceneCountChange} />
+                  <StylePicker value={style} onChange={onStyleChange} align="right" openUp />
+                </div>
                 <div className="flex gap-2">
                   <button
                     onClick={() => fileInputRef.current?.click()}

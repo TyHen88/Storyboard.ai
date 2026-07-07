@@ -1,8 +1,12 @@
 'use client';
 
 import { motion } from 'motion/react';
+import type { WorldBible } from '@/lib/types';
 
-export default function TitleCard({ title, concept }: { title: string; concept: string }) {
+export default function TitleCard({ title, concept, world }: { title: string; concept: string; world?: WorldBible }) {
+  const tags = world
+    ? ([world.genre, world.tone, world.timePeriod, world.visualStyle].filter(Boolean) as string[])
+    : [];
   return (
     <motion.div
       initial={{ opacity: 0, y: 50 }}
@@ -15,6 +19,19 @@ export default function TitleCard({ title, concept }: { title: string; concept: 
         <h1 className="text-4xl font-bold tracking-tighter mb-4">{title}</h1>
         <div className="h-1 w-12 bg-white/30 dark:bg-black/30 rounded mb-4"></div>
         <p className="text-lg text-gray-300 dark:text-zinc-700 leading-relaxed font-light">{concept}</p>
+        {tags.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 mt-5">
+            {tags.map((t, i) => (
+              <span
+                key={i}
+                className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-white/10 dark:bg-black/10 text-gray-200 dark:text-zinc-700 border border-white/10 dark:border-black/10 max-w-[220px] truncate"
+                title={t}
+              >
+                {t}
+              </span>
+            ))}
+          </div>
+        )}
       </div>
     </motion.div>
   );

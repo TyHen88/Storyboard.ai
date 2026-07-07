@@ -1,6 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
-import { STORY_SCHEMA, DIRECTING_RULES } from "@/lib/gemini-schemas";
+import { STORY_SCHEMA, BLUEPRINT_SCHEMA, DIRECTING_RULES } from "@/lib/gemini-schemas";
 import { geminiGenerate, friendlyGeminiError } from "@/lib/gemini";
+import { styleDescriptor } from "@/lib/styles";
+
+/**
+ * Storyboard generation as a small film-production pipeline instead of one
+ * giant prompt:
+ *   1. Blueprint — plan genre/tone/pacing, a World & Style bible, a Character
+ *      bible, and a 3-act beat outline (one beat per scene).
+ *   2. Produce  — expand the blueprint into full cinematic scenes.
+ *   3. QA       — a continuity pass that fixes drift before the user sees it.
+ * Each stage validates the previous one; any stage can fall back so a single
+ * failed pass never breaks generation.
+ */
 
 /** Clamp the requested scene count to the supported 1–6 range. */
 function clampSceneCount(raw: unknown): number {
@@ -9,70 +21,179 @@ function clampSceneCount(raw: unknown): number {
   return Math.min(6, Math.max(1, n));
 }
 
-/**
- * Narrative structure guidance tailored to how many scenes were requested.
- * One scene is a single iconic shot; a full arc only makes sense with several.
- */
+/** Narrative structure guidance tailored to how many scenes were requested. */
 function structureGuidance(count: number): string {
   if (count === 1) {
-    return `Write exactly ONE scene: a single, self-contained, iconic shot that captures the heart of the concept — the most cinematic, emotionally loaded moment of the story. It must stand alone with no "to be continued" feeling.`;
+    return `a single, self-contained, iconic beat that captures the heart of the concept — the most cinematic, emotionally loaded moment.`;
   }
   if (count === 2) {
-    return `Write exactly 2 scenes: a setup that establishes the world and stakes, and a payoff that resolves or twists them. The second must follow directly and meaningfully from the first.`;
+    return `2 beats: a setup that establishes world and stakes, and a payoff that resolves or twists them.`;
   }
   if (count === 3) {
-    return `Write exactly 3 scenes forming a tight three-act shape: setup → confrontation → resolution. Each turn should raise the stakes.`;
+    return `3 beats in a tight three-act shape: setup → confrontation → resolution, each raising the stakes.`;
   }
-  return `Write exactly ${count} scenes forming a complete narrative arc (setup → rising action → climax → resolution), pacing the beats so the climax lands near the end and the final scene resolves the story.`;
+  return `${count} beats forming a complete arc (setup → rising action → climax → resolution), with the climax near the end and the final beat resolving the story.`;
+}
+
+/** Build the reference-image content part from a data URL, if present. */
+function imagePart(image?: string): any | null {
+  if (!image) return null;
+  const match = image.match(/^data:(image\/[a-zA-Z]*);base64,([^\"]*)$/);
+  if (!match) return null;
+  return { inlineData: { mimeType: match[1], data: match[2] } };
+}
+
+/** Stage 1 — the pre-production blueprint. */
+async function generateBlueprint(
+  prompt: string,
+  count: number,
+  style: string,
+  model: string | undefined,
+  image?: string
+) {
+  const parts: any[] = [
+    {
+      text: `You are a Story Planner, Story Architect, Production Designer and Character Director building the pre-production blueprint for a cinematic storyboard.
+
+User concept: "${prompt}"
+
+Honor this visual style as the film's consistent look: ${style}
+
+Produce a BLUEPRINT that FAITHFULLY serves the user's concept (same subject, genre, tone, setting):
+1. Determine genre, tone, pacing, target audience, and a one-sentence logline built around the dramatic core (who wants what, what's in the way, the feeling to leave the audience with).
+2. WORLD & STYLE BIBLE: name, genre, setting, time period, technology/magic rules, signature color palette, a single consistent visualStyle (fuse the requested style above), lighting style, and recurring atmosphere. This bible governs every scene.
+3. CHARACTER BIBLE: define ${'1-4'} main characters (only as many as the story needs). Each gets a full, specific, memorable profile with a consolidated appearance that is the single source of truth and never changes.
+4. BEATS: break the story into ${structureGuidance(count)} Provide EXACTLY ${count} beats, ordered, tagged with their act (1/2/3), each with goal, conflict, emotion, and story purpose. Beats must follow logically and track each character's emotional arc.`,
+    },
+  ];
+  const img = imagePart(image);
+  if (img) {
+    parts.push(img);
+    parts.push({
+      text: "Use the attached reference image as the visual reference for the characters and/or setting: match its subjects' appearance and style in the World and Character bibles.",
+    });
+  }
+  return geminiGenerate(parts, BLUEPRINT_SCHEMA, model);
+}
+
+/** Stage 2 — expand the blueprint into full cinematic scenes. */
+async function produceScenes(blueprint: any, count: number, model: string | undefined) {
+  const parts: any[] = [
+    {
+      text: `You are a Screenwriter, Director and Storyboard Artist turning a pre-production blueprint into a production-ready storyboard for AI video generation.
+
+BLUEPRINT (authoritative — do not contradict it):
+${JSON.stringify(blueprint, null, 2)}
+
+Write the full storyboard as structured data:
+- Carry the blueprint's World & Style bible into "world" (keep its meaning; you may polish wording).
+- Use the blueprint's Character Bible verbatim as "characters" — appearances are the single source of truth and must stay identical in every scene; never add characters outside this cast.
+- Produce EXACTLY ${count} scenes, one per beat, in the blueprint's order. Each scene must realize its beat's goal, conflict, emotion and purpose.
+- Every scene's imagePrompt must be self-contained (shot, angle, setting, lighting, action) and repeat the FULL verbatim appearance of every character present, using world.visualStyle as the one consistent style.
+- Show emotion and stakes through staging and imagery; keep dialogue sparse and purposeful; vary shot types scene to scene.
+${DIRECTING_RULES}`,
+    },
+  ];
+  return geminiGenerate(parts, STORY_SCHEMA, model);
+}
+
+/** Stage 3 — continuity QA: fix drift, return the corrected storyboard. */
+async function continuityPass(story: any, count: number, model: string | undefined) {
+  const parts: any[] = [
+    {
+      text: `You are a Continuity Checker and Editor performing final QA on a storyboard before delivery.
+
+STORYBOARD JSON:
+${JSON.stringify(story, null, 2)}
+
+Inspect every scene for continuity errors and FIX them in place:
+- Character appearance / clothing / hair / age drift between scenes.
+- Sudden unexplained lighting, weather, or time-of-day jumps.
+- Emotional progression that doesn't follow from the previous scene.
+- Timeline or spatial logic errors; camera sanity (avoid crossing the 180° line without motivation).
+- imagePrompts that fail to repeat the base character appearances verbatim or drift from world.visualStyle.
+
+Return the COMPLETE corrected StoryData: same title, same "world", same "characters", the same ${count} scenes with unchanged sceneNumbers. Change only what is genuinely inconsistent; preserve everything else. Every field must remain filled.
+${DIRECTING_RULES}`,
+    },
+  ];
+  return geminiGenerate(parts, STORY_SCHEMA, model);
+}
+
+/** Fallback — the original single-call generation, used if the pipeline fails. */
+async function generateLegacy(
+  prompt: string,
+  count: number,
+  style: string,
+  model: string | undefined,
+  image?: string
+) {
+  const parts: any[] = [
+    {
+      text: `You are an award-winning film director, cinematographer, screenwriter and storyboard artist producing a production-ready storyboard for AI video generation based on: "${prompt}".
+
+Honor this visual style throughout: ${style}
+
+FAITHFULLY follow the user's subject, genre, tone and setting.
+1. WORLD & STYLE BIBLE ("world"): name, genre, setting, time period, tech/magic, color palette, a single consistent visualStyle (fuse the requested style), lighting style, atmosphere.
+2. CHARACTERS (1-4): full profiles with a consolidated appearance that is the single source of truth and never changes.
+3. SCENES: exactly ${count} scenes forming a complete narrative arc (setup → rising action → climax → resolution), with the climax near the end and the final scene resolving the story. Each imagePrompt is self-contained and repeats every present character's appearance verbatim, in one consistent visualStyle.
+${DIRECTING_RULES}`,
+    },
+  ];
+  const img = imagePart(image);
+  if (img) {
+    parts.push(img);
+    parts.push({
+      text: 'Use the attached reference image as the visual reference for the characters and/or setting.',
+    });
+  }
+  return geminiGenerate(parts, STORY_SCHEMA, model);
 }
 
 export async function POST(req: NextRequest) {
   try {
-    const { prompt, image, sceneCount, model } = await req.json();
+    const { prompt, image, sceneCount, model, style } = await req.json();
 
     if (!prompt) {
-      return NextResponse.json(
-        { error: "Prompt is required" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "Prompt is required" }, { status: 400 });
     }
 
     const count = clampSceneCount(sceneCount);
+    const styleGuide = styleDescriptor(style);
 
-    let parts: any[] = [
-      { text: `You are an award-winning film director, cinematographer, screenwriter and storyboard artist producing a production-ready storyboard for AI video generation.
-The user wants a storytelling experience/film based on this prompt: "${prompt}".
+    // Stage 1: blueprint. If it fails, fall back to the single-call generator.
+    let blueprint: any;
+    try {
+      blueprint = await generateBlueprint(prompt, count, styleGuide, model, image);
+    } catch (err) {
+      console.warn("Blueprint stage failed, using legacy single-call generation.", err);
+      const legacy = await generateLegacy(prompt, count, styleGuide, model, image);
+      return NextResponse.json(legacy);
+    }
 
-Your job is to turn that prompt into a vivid, coherent visual story. Think first about the dramatic core: who wants what, what stands in the way, and the single feeling the audience should leave with. Then build the board around that. FAITHFULLY honor the user's subject, genre, tone and setting — never drift into a different premise.
+    // Stage 2: produce scenes from the blueprint (core — legacy fallback if it fails).
+    let story: any;
+    try {
+      story = await produceScenes(blueprint, count, model);
+    } catch (err) {
+      console.warn("Produce stage failed, using legacy single-call generation.", err);
+      const legacy = await generateLegacy(prompt, count, styleGuide, model, image);
+      return NextResponse.json(legacy);
+    }
 
-1. BASE CHARACTERS: first define the main characters (1-4, only as many as the story truly needs). For each provide the full profile: role, consolidated appearance (the single source of truth), age, height, face, hairstyle, clothing, accessories, personality, voice style, and their emotional arc across the story. Give them specific, memorable, non-generic looks. Appearances must stay identical in every scene — never redesign them, never add characters outside this cast.
-
-2. SCENES: ${structureGuidance(count)} Each scene must follow logically from the previous one, stay consistent in setting/tone/time period, and directly serve the user's prompt. Vary the shot types and camera work scene to scene so the board feels edited, not repetitive. Track each character's emotional progression scene to scene, consistent with their emotional arc. Prefer showing emotion and stakes through action, staging and imagery over on-the-nose exposition. Keep dialogue sparse, natural and purposeful — cut any line that doesn't reveal character or move the story.
-
-3. IMAGE PROMPTS: each scene's imagePrompt must be fully self-contained for an image model: shot type and camera angle, setting and time of day, lighting and mood, the action happening — and it must repeat the FULL exact appearance description of every base character present (copy the base description verbatim). Use one consistent visual style across all imagePrompts.
-${DIRECTING_RULES}` }
-    ];
-
-    if (image) {
-      // Split "data:image/jpeg;base64,..." to get the pure base64 data and mime type
-      const match = image.match(/^data:(image\/[a-zA-Z]*);base64,([^\"]*)$/);
-      if (match) {
-        const mimeType = match[1];
-        const base64Data = match[2];
-        parts.push({
-          inlineData: {
-            data: base64Data,
-            mimeType: mimeType
-          }
-        });
-        parts.push({
-          text: "Use the attached reference image as the visual reference for the base characters and/or setting: match its subjects' appearance and style in the base character descriptions and image prompts."
-        });
+    // Stage 3: continuity QA (best-effort). Skipped for 1–2 scenes, where there's
+    // little continuity to drift and it isn't worth the extra latency.
+    if (count >= 3) {
+      try {
+        const checked = await continuityPass(story, count, model);
+        if (checked?.scenes?.length) story = checked;
+      } catch (err) {
+        console.warn("Continuity QA stage failed, returning produced storyboard.", err);
       }
     }
 
-    const data = await geminiGenerate(parts, STORY_SCHEMA, model);
-    return NextResponse.json(data);
+    return NextResponse.json(story);
   } catch (error: any) {
     console.error("Gemini API Error:", error);
     const { message, status } = friendlyGeminiError(error);

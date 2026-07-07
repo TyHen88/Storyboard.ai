@@ -6,8 +6,13 @@ import { GoogleGenAI } from '@google/genai';
  * falls back to an alternate model when the primary stays unavailable.
  */
 
-const MODELS = ['gemini-3.5-flash', 'gemini-2.5-flash'];
+// Reliable, fast primary with a reliable secondary. Slower/preview models
+// (e.g. gemini-3.5-flash) are only used when the user explicitly picks them.
+const MODELS = ['gemini-2.5-flash', 'gemini-2.5-pro'];
 const ATTEMPTS_PER_MODEL = 2;
+// Per-call ceiling so a hanging model fails fast and falls over instead of
+// blocking for undici's ~5 min default (which produced 10 min dead requests).
+const PER_CALL_TIMEOUT_MS = 150_000;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -27,6 +32,16 @@ const isModelUnavailable = (error: any) => {
   return s === 400 && (msg.includes('not found') || msg.includes('not supported') || msg.includes('unsupported') || msg.includes('does not exist'));
 };
 
+/** Request hung / connection dropped — the model is too slow; try the next one. */
+const isTimeoutOrNetwork = (error: any) => {
+  const code = error?.cause?.code ?? error?.code;
+  if (['UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_BODY_TIMEOUT', 'UND_ERR_CONNECT_TIMEOUT', 'ETIMEDOUT', 'ECONNRESET'].includes(code)) {
+    return true;
+  }
+  const msg = String(error?.message ?? '').toLowerCase();
+  return msg.includes('fetch failed') || msg.includes('timeout') || msg.includes('aborted');
+};
+
 /** Ordered, de-duplicated model list with the user's preferred model first. */
 const modelChain = (preferred?: string): string[] => {
   const chain = preferred ? [preferred, ...MODELS] : [...MODELS];
@@ -40,6 +55,7 @@ export async function geminiGenerate(parts: any[], schema: object, preferredMode
       headers: {
         'User-Agent': 'aistudio-build',
       },
+      timeout: PER_CALL_TIMEOUT_MS,
     },
   });
 
@@ -67,9 +83,9 @@ export async function geminiGenerate(parts: any[], schema: object, preferredMode
           await sleep(800 * (attempt + 1) + Math.random() * 400);
           continue;
         }
-        // Unavailable model: skip to the next model in the chain instead of failing.
-        if (isModelUnavailable(error) && hasNextModel) {
-          console.warn(`Gemini ${model} unavailable (${statusOf(error)}), falling back to ${models[m + 1]}.`);
+        // Unavailable or hanging model: skip to the next model in the chain.
+        if ((isModelUnavailable(error) || isTimeoutOrNetwork(error)) && hasNextModel) {
+          console.warn(`Gemini ${model} failed (${statusOf(error) ?? error?.cause?.code ?? error?.message}), falling back to ${models[m + 1]}.`);
           break;
         }
         throw error;

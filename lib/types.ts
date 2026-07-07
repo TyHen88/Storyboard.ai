@@ -52,9 +52,28 @@ export interface Scene {
   transition?: string;
 }
 
+/** Project-wide World & Style bible, shared by every scene for consistency. */
+export interface WorldBible {
+  name?: string;
+  genre?: string;
+  tone?: string;
+  pacing?: string;
+  setting?: string;
+  timePeriod?: string;
+  /** Technology or magic rules governing the world. */
+  technologyOrMagic?: string;
+  colorPalette?: string;
+  /** The consistent cinematic style guide applied across all scenes. */
+  visualStyle?: string;
+  lightingStyle?: string;
+  atmosphere?: string;
+}
+
 export interface StoryData {
   title: string;
   concept: string;
+  /** World & Style bible (optional for backward compatibility with older saves). */
+  world?: WorldBible;
   characters?: Character[];
   scenes: Scene[];
 }

@@ -7,6 +7,7 @@ import { Wand2, Paperclip, Settings } from 'lucide-react';
 import { IDEAS } from '@/lib/constants';
 import SceneCountPicker from '@/components/SceneCountPicker';
 import ModelDropdown from '@/components/ModelDropdown';
+import StylePicker from '@/components/StylePicker';
 
 /** First-launch bottom-center chat input with hero text and animated border. */
 export default function ChatBar({
@@ -17,6 +18,8 @@ export default function ChatBar({
   onAttach,
   sceneCount,
   onSceneCountChange,
+  style,
+  onStyleChange,
   onGenerate,
   error,
 }: {
@@ -27,6 +30,8 @@ export default function ChatBar({
   onAttach: () => void;
   sceneCount: number;
   onSceneCountChange: (n: number) => void;
+  style: string;
+  onStyleChange: (id: string) => void;
   onGenerate: () => void;
   error: string;
 }) {
@@ -104,7 +109,10 @@ export default function ChatBar({
               }}
             />
             <div className="flex items-center justify-between gap-2.5 mt-1">
-              <SceneCountPicker value={sceneCount} onChange={onSceneCountChange} variant="dark" />
+              <div className="flex items-center gap-2 min-w-0">
+                <SceneCountPicker value={sceneCount} onChange={onSceneCountChange} variant="dark" />
+                <StylePicker value={style} onChange={onStyleChange} align="left" openUp />
+              </div>
               <div className="flex items-center gap-2.5">
               <ModelDropdown
                 align="left"

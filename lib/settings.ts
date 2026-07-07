@@ -2,7 +2,9 @@
 // useSyncExternalStore — same pattern as lib/theme.ts — so the server render
 // uses the default without a hydration mismatch.
 
-export const MODEL_KEY = 'sb-model';
+// v2: reset anyone previously stuck on the slow/unreliable gemini-3.5-flash
+// default to the reliable gemini-2.5-flash.
+export const MODEL_KEY = 'sb-model-v2';
 export const MODEL_EVENT = 'sb-model-change';
 
 export interface ModelOption {
@@ -18,9 +20,9 @@ export interface ModelOption {
  * is safe.
  */
 export const MODEL_OPTIONS: ModelOption[] = [
-  { id: 'gemini-3.5-flash', label: 'Gemini 3.5 Flash', hint: 'Fast, great quality — recommended' },
-  { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash', hint: 'Stable and quick' },
+  { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash', hint: 'Fast and reliable — recommended' },
   { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro', hint: 'Slower, highest quality' },
+  { id: 'gemini-3.5-flash', label: 'Gemini 3.5 Flash', hint: 'Newest — can be slow or unavailable in some regions' },
 ];
 
 export const DEFAULT_MODEL = MODEL_OPTIONS[0].id;

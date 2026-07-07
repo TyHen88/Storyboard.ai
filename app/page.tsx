@@ -8,6 +8,7 @@ import type { Scene, Dialogue, StoryData, Character } from '@/lib/types';
 import { PAD, TITLE_W, SCENE_W, GAP, MIN_SCALE, MAX_SCALE } from '@/lib/constants';
 import { THEME_KEY, THEME_EVENT, subscribeTheme, readTheme } from '@/lib/theme';
 import { subscribeModel, readModel, DEFAULT_MODEL } from '@/lib/settings';
+import { DEFAULT_STYLE } from '@/lib/styles';
 import { loadProject } from '@/lib/storage';
 import { loadHistory, saveEntry, deleteEntry, newProjectId, type HistoryEntry } from '@/lib/history';
 import Sidebar from '@/components/Sidebar';
@@ -30,6 +31,8 @@ export default function StoryboardApp() {
   const [imageBase64, setImageBase64] = useState<string>('');
   // How many scenes to generate (1–6)
   const [sceneCount, setSceneCount] = useState(6);
+  // Chosen director-style preset
+  const [style, setStyle] = useState(DEFAULT_STYLE);
   const [isGenerating, setIsGenerating] = useState(false);
   const [storyData, setStoryData] = useState<StoryData | null>(null);
   // Conversation history (saved storyboards) + the id of the active one
@@ -285,7 +288,7 @@ export default function StoryboardApp() {
       const res = await fetch('/api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt, image: imageBase64, sceneCount, model }),
+        body: JSON.stringify({ prompt, image: imageBase64, sceneCount, model, style }),
       });
 
       if (!res.ok) {
@@ -541,6 +544,8 @@ export default function StoryboardApp() {
           onRemoveImage={removeImage}
           sceneCount={sceneCount}
           onSceneCountChange={setSceneCount}
+          style={style}
+          onStyleChange={setStyle}
           isGenerating={isGenerating}
           onGenerate={handleGenerate}
           error={error}
@@ -615,6 +620,8 @@ export default function StoryboardApp() {
                 onAttach={() => fileInputRef.current?.click()}
                 sceneCount={sceneCount}
                 onSceneCountChange={setSceneCount}
+                style={style}
+                onStyleChange={setStyle}
                 onGenerate={handleGenerate}
                 error={error}
               />
@@ -667,7 +674,7 @@ export default function StoryboardApp() {
                   />
 
                   <div className="p-20 flex flex-row gap-16 items-start relative">
-                    <TitleCard title={storyData.title} concept={storyData.concept} />
+                    <TitleCard title={storyData.title} concept={storyData.concept} world={storyData.world} />
 
                     {(storyData.characters?.length ?? 0) > 0 && (
                       <CastCard characters={storyData.characters!} onUpdateCharacter={updateCharacter} />
